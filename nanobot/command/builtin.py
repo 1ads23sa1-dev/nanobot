@@ -142,6 +142,28 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_deep(ctx: CommandContext) -> OutboundMessage:
+    """Enable PhilosopherAgent (slow-think with self-verification)."""
+    loop = ctx.loop
+    loop.enable_philosopher(enabled=True)
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content="Deep thinking enabled. I'll think more carefully before responding.",
+        metadata=dict(ctx.msg.metadata or {})
+    )
+
+
+async def cmd_shallow(ctx: CommandContext) -> OutboundMessage:
+    """Disable PhilosopherAgent, return to fast mode."""
+    loop = ctx.loop
+    loop.enable_philosopher(enabled=False)
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content="Deep thinking disabled. Back to fast mode.",
+        metadata=dict(ctx.msg.metadata or {})
+    )
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -407,6 +429,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
     router.exact("/dream", cmd_dream)
+    router.exact("/deep", cmd_deep)
+    router.exact("/shallow", cmd_shallow)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)

@@ -297,6 +297,15 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
+        # PhilosopherAgent: optional slow-think with self-verification
+        self._philosopher = None
+        self._philosopher_enabled = False
+        self._philosopher_max_verification = 2
+        # BackgroundSummarizer: layered memory consolidation
+        self._summarizer = None
+        self._summarizer_enabled = True
+        self._summarizer_interval = 10
+        self._turn_count = 0
         self._register_default_tools()
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
@@ -334,6 +343,51 @@ class AgentLoop:
         if snapshot.signature == self._provider_signature:
             return
         self._apply_provider_snapshot(snapshot)
+
+    def enable_philosopher(self, enabled: bool = True, max_verification: int = 2) -> None:
+        """Enable PhilosopherAgent for slow-think with self-verification."""
+        self._philosopher_enabled = enabled
+        self._philosopher_max_verification = max_verification
+        if enabled and self._philosopher is None:
+            from nanobot.agent.philosopher import PhilosopherAgent
+            self._philosopher = PhilosopherAgent(
+                provider=self.provider,
+                workspace=self.workspace,
+                tool_registry=self.tools,
+                max_verification_attempts=max_verification,
+            )
+            logger.info("PhilosopherAgent enabled")
+        elif not enabled:
+            self._philosopher = None
+            logger.info("PhilosopherAgent disabled")
+
+    def enable_summarizer(self, enabled: bool = True, interval_turns: int = 10) -> None:
+        """Enable BackgroundSummarizer for layered memory consolidation."""
+        self._summarizer_enabled = enabled
+        self._summarizer_interval = interval_turns
+        if enabled and self._summarizer is None:
+            from nanobot.agent.summarizer import BackgroundSummarizer
+            self._summarizer = BackgroundSummarizer(
+                provider=self.provider,
+                workspace=self.workspace,
+                tool_registry=self.tools,
+                summary_interval_turns=interval_turns,
+            )
+            self._summarizer.start()
+            logger.info("BackgroundSummarizer enabled")
+        elif not enabled and self._summarizer:
+            self._summarizer.stop()
+            self._summarizer = None
+            logger.info("BackgroundSummarizer disabled")
+
+    def _tick_summarizer(self) -> None:
+        """Called after each conversation turn to trigger summarization."""
+        if not self._summarizer_enabled or self._summarizer is None:
+            return
+        self._turn_count += 1
+        if self._turn_count >= self._summarizer_interval:
+            self._turn_count = 0
+            asyncio.create_task(self._summarizer._consolidate())
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -1067,6 +1121,9 @@ class AgentLoop:
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+
+        # Tick the BackgroundSummarizer for layered memory consolidation
+        self._tick_summarizer()
 
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be

@@ -98,6 +98,10 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    philosopher_enabled: bool = Field(default=False, description="Enable PhilosopherAgent (slow-think with self-verification)")
+    philosopher_max_verification_attempts: int = Field(default=2, ge=1, le=5, description="Max self-verification attempts for PhilosopherAgent")
+    summarizer_enabled: bool = Field(default=True, description="Enable BackgroundSummarizer (layered memory consolidation)")
+    summarizer_interval_turns: int = Field(default=10, ge=3, description="Conversation turns between automatic summarization")
 
 
 class AgentsConfig(Base):
