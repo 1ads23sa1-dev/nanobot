@@ -428,6 +428,11 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+        # Register memory search tool (RAG for memory + workspace docs)
+        from nanobot.agent.tools.memory_search import MemorySearchToolWrapper
+        self.tools.register(
+            MemorySearchToolWrapper(workspace=self.workspace, memory_store=self.context.memory)
+        )
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
