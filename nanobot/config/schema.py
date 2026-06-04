@@ -245,6 +245,20 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class CompanionConfig(Base):
+    """Random-triggered proactive companion messages (backed by cron checks)."""
+
+    enabled: bool = True
+    check_interval_s: int = Field(default=20 * 60, ge=60)  # roll dice every 20 minutes
+    send_probability: float = Field(default=0.18, ge=0.0, le=1.0)
+    min_interval_s: int = Field(default=90 * 60, ge=0)  # at least 90 minutes between sends
+    quiet_hours_start: str = "23:00"
+    quiet_hours_end: str = "08:00"
+    channel: str = ""  # optional pinned delivery channel (e.g. "telegram")
+    chat_id: str = ""  # optional pinned chat/user id
+    keep_recent_messages: int = Field(default=8, ge=1)
+
+
 class ApiConfig(Base):
     """OpenAI-compatible API server configuration."""
 
@@ -259,6 +273,7 @@ class GatewayConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    companion: CompanionConfig = Field(default_factory=CompanionConfig)
 
 
 class MCPServerConfig(Base):

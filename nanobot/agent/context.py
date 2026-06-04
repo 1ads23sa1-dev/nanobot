@@ -57,9 +57,10 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None, *, companion_enabled: bool = False):
         self.workspace = workspace
         self.timezone = timezone
+        self.companion_enabled = companion_enabled
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
 
@@ -78,6 +79,11 @@ class ContextBuilder:
         bootstrap = self._load_bootstrap_files(root)
         if bootstrap:
             parts.append(bootstrap)
+
+        if self.companion_enabled:
+            persona = load_bundled_template("companion/PERSONA.md")
+            if persona:
+                parts.append(f"# Companion\n\n{persona.strip()}")
 
         parts.append(render_template("agent/tool_contract.md"))
 

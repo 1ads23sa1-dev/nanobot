@@ -200,6 +200,7 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        companion_enabled: bool = False,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -265,7 +266,12 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            companion_enabled=companion_enabled,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -366,6 +372,10 @@ class AgentLoop:
             config,
             provider_snapshot_loader,
         )
+        disabled_skills = list(defaults.disabled_skills)
+        companion_enabled = config.gateway.companion.enabled
+        if not companion_enabled and "companion" not in disabled_skills:
+            disabled_skills.append("companion")
         return cls(
             bus=bus,
             provider=provider,
@@ -383,7 +393,8 @@ class AgentLoop:
             channels_config=config.channels,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
-            disabled_skills=defaults.disabled_skills,
+            disabled_skills=disabled_skills,
+            companion_enabled=companion_enabled,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,

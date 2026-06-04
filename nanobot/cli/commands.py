@@ -883,6 +883,7 @@ def _run_gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.companion import pick_delivery_target
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
@@ -1040,7 +1041,12 @@ def _run_gateway(
                 logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
                 return None
 
-            channel, chat_id = _pick_heartbeat_target()
+            channel, chat_id = pick_delivery_target(
+                pinned_channel="",
+                pinned_chat_id="",
+                enabled_channels=set(channels.enabled_channels),
+                session_manager=session_manager,
+            )
             if channel == "cli":
                 return None
 
@@ -1088,6 +1094,66 @@ def _run_gateway(
                 )
             else:
                 logger.info("Heartbeat: silenced by post-run evaluation")
+            return response
+
+        # Companion: random-triggered proactive check-ins (not fixed clock schedules).
+        if job.name == "companion":
+            from nanobot.companion import (
+                COMPANION_PREAMBLE,
+                companion_state_path,
+                record_companion_sent,
+                should_send_companion_message,
+            )
+
+            companion_cfg = config.gateway.companion
+            decision = should_send_companion_message(
+                companion_cfg,
+                workspace=config.workspace_path,
+                timezone=config.agents.defaults.timezone,
+            )
+            if not decision.should_send:
+                logger.debug("Companion: skipped ({})", decision.reason)
+                return None
+
+            channel, chat_id = pick_delivery_target(
+                pinned_channel=companion_cfg.channel,
+                pinned_chat_id=companion_cfg.chat_id,
+                enabled_channels=set(channels.enabled_channels),
+                session_manager=session_manager,
+            )
+            if channel == "cli":
+                logger.debug("Companion: no routable delivery target")
+                return None
+
+            suppress_token = None
+            if isinstance(message_tool, MessageTool):
+                suppress_token = message_tool.set_suppress_delivery(True)
+            try:
+                resp = await agent.process_direct(
+                    COMPANION_PREAMBLE,
+                    session_key="companion",
+                    channel=channel,
+                    chat_id=chat_id,
+                    on_progress=_silent,
+                )
+            finally:
+                if isinstance(message_tool, MessageTool) and suppress_token is not None:
+                    message_tool.reset_suppress_delivery(suppress_token)
+            response = (resp.content if resp else "").strip()
+            if not response:
+                logger.info("Companion: empty response, not delivering")
+                return None
+
+            session = agent.sessions.get_or_create("companion")
+            session.retain_recent_legal_suffix(companion_cfg.keep_recent_messages)
+            agent.sessions.save(session)
+
+            logger.info("Companion: delivering proactive message ({})", decision.reason)
+            await _deliver_to_channel(
+                OutboundMessage(channel=channel, chat_id=chat_id, content=response),
+                record=True,
+            )
+            record_companion_sent(companion_state_path(config.workspace_path))
             return response
 
         reminder_note = (
@@ -1164,20 +1230,6 @@ def _run_gateway(
         webui_runtime_capabilities=webui_runtime_capabilities,
     )
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        return "cli", "direct"
-
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -1192,6 +1244,15 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
     else:
         console.print("[yellow]✗[/yellow] Heartbeat: disabled")
+
+    companion_cfg = config.gateway.companion
+    if companion_cfg.enabled:
+        console.print(
+            f"[green]✓[/green] Companion: check every {companion_cfg.check_interval_s}s, "
+            f"p={companion_cfg.send_probability:.0%}, min gap {companion_cfg.min_interval_s}s"
+        )
+    else:
+        console.print("[yellow]✗[/yellow] Companion: disabled")
 
     async def _health_server(host: str, health_port: int):
         """Lightweight HTTP health endpoint on the gateway port."""
@@ -1257,6 +1318,18 @@ def _run_gateway(
             schedule=CronSchedule(
                 kind="every",
                 every_ms=hb_cfg.interval_s * 1000,
+                tz=config.agents.defaults.timezone,
+            ),
+            payload=CronPayload(kind="system_event"),
+        ))
+
+    if companion_cfg.enabled:
+        cron.register_system_job(CronJob(
+            id="companion",
+            name="companion",
+            schedule=CronSchedule(
+                kind="every",
+                every_ms=companion_cfg.check_interval_s * 1000,
                 tz=config.agents.defaults.timezone,
             ),
             payload=CronPayload(kind="system_event"),
