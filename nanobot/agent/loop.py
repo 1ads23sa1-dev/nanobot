@@ -550,6 +550,7 @@ class AgentLoop:
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_events=self.runtime_events,
+            memory_store=self.context.memory,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -560,13 +561,6 @@ class AgentLoop:
                 MyTool(runtime_state=self, modify_allowed=self.tools_config.my.allow_set)
             )
             registered.append("my")
-
-        # Register memory search tool (RAG for memory + workspace docs)
-        from nanobot.agent.tools.memory_search import MemorySearchToolWrapper
-        self.tools.register(
-            MemorySearchToolWrapper(workspace=self.workspace, memory_store=self.context.memory)
-        )
-        registered.append("memory_search")
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 

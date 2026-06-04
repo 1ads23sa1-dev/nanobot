@@ -11,9 +11,11 @@ from loguru import logger
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.rag.bm25 import BM25Index
 from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.context import ToolContext
 
 
 class MemorySearchTool(Tool):
+    _plugin_discoverable = False
     """
     Search nanobot's memory and local documents.
 
@@ -219,6 +221,13 @@ class MemorySearchToolWrapper(Tool):
     Async wrapper for MemorySearchTool that runs in executor.
     This allows the sync tool to work in async context.
     """
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        return cls(
+            workspace=Path(ctx.workspace),
+            memory_store=ctx.memory_store,
+        )
 
     name = "memory_search"
     description = MemorySearchTool.description
