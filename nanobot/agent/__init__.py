@@ -3,7 +3,7 @@
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.memory import Dream, MemoryStore
+from nanobot.agent.memory import MemoryStore
 from nanobot.agent.philosopher import PhilosopherAgent
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.summarizer import BackgroundSummarizer
@@ -16,7 +16,6 @@ __all__ = [
     "BackgroundSummarizer",
     "CompositeHook",
     "ContextBuilder",
-    "Dream",
     "MemoryStore",
     "PhilosopherAgent",
     "SkillsLoader",
