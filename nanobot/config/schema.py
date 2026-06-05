@@ -245,6 +245,18 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class MessageBurstConfig(Base):
+    """Split outbound text into multiple chat bubbles with optional random delays."""
+
+    enabled: bool = True
+    burst_probability: float = Field(default=0.30, ge=0.0, le=1.0)
+    max_parts: int = Field(default=3, ge=1, le=5)
+    min_delay_s: float = Field(default=2.5, ge=0.0)
+    max_delay_s: float = Field(default=7.0, ge=0.0)
+    split_marker: str = "---"
+    channels: list[str] = Field(default_factory=lambda: ["weixin"])
+
+
 class CompanionConfig(Base):
     """Random-triggered proactive companion messages (backed by cron checks)."""
 
@@ -257,6 +269,10 @@ class CompanionConfig(Base):
     channel: str = ""  # optional pinned delivery channel (e.g. "telegram")
     chat_id: str = ""  # optional pinned chat/user id
     keep_recent_messages: int = Field(default=8, ge=1)
+    followup_enabled: bool = True
+    followup_check_interval_s: int = Field(default=5 * 60, ge=60)
+    max_followup_nudges: int = Field(default=3, ge=0, le=5)
+    min_followup_interval_s: int = Field(default=10 * 60, ge=60)
 
 
 class ApiConfig(Base):
@@ -274,6 +290,7 @@ class GatewayConfig(Base):
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
+    message_burst: MessageBurstConfig = Field(default_factory=MessageBurstConfig)
 
 
 class MCPServerConfig(Base):

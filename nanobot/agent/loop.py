@@ -1038,6 +1038,12 @@ class AgentLoop:
                     completed_chat_id = msg.chat_id
                     if response is not None:
                         await self.bus.publish_outbound(response)
+                        plan_cb = getattr(self, "_followup_plan_callback", None)
+                        if plan_cb is not None:
+                            try:
+                                plan_cb(response)
+                            except Exception:
+                                logger.exception("followup plan callback failed")
                         completed_channel = response.channel
                         completed_chat_id = response.chat_id
                     elif msg.channel == "cli":

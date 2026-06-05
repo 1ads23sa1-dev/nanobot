@@ -941,8 +941,43 @@ def _run_gateway(
             else f"{channel}:{chat_id}"
         )
 
+    companion_cfg = config.gateway.companion
+
+    async def _plan_followup_from_outbound(
+        msg: OutboundMessage,
+        *,
+        origin: str,
+    ) -> None:
+        from nanobot.companion.followup import plan_followup_after_send
+
+        if not companion_cfg.followup_enabled or msg.channel != "weixin":
+            return
+        if not (msg.content or "").strip():
+            return
+        if (msg.metadata or {}).get("_followup_nudge"):
+            return
+        await plan_followup_after_send(
+            workspace=config.workspace_path,
+            cfg=companion_cfg,
+            provider=agent.provider,
+            model=agent.model,
+            session_manager=session_manager,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            session_key=_channel_session_key(msg.channel, msg.chat_id),
+            anchor_text=msg.content.strip(),
+            origin=origin,  # type: ignore[arg-type]
+            timezone=config.agents.defaults.timezone,
+        )
+
+    def _schedule_followup_plan(msg: OutboundMessage, *, origin: str) -> None:
+        agent._schedule_background(_plan_followup_from_outbound(msg, origin=origin))
+
+    agent._followup_plan_callback = lambda resp: _schedule_followup_plan(resp, origin="reply")
+
     async def _deliver_to_channel(
         msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
+        followup_origin: str | None = None,
     ) -> None:
         """Publish a user-visible message and mirror it into that channel's session."""
         metadata = dict(msg.metadata or {})
@@ -972,6 +1007,12 @@ def _run_gateway(
             session.add_message("assistant", msg.content, **extra)
             session_manager.save(session)
         await bus.publish_outbound(msg)
+        if (
+            followup_origin
+            and msg.channel == "weixin"
+            and not (msg.metadata or {}).get("_followup_nudge")
+        ):
+            _schedule_followup_plan(msg, origin=followup_origin)
 
     message_tool = getattr(agent, "tools", {}).get("message")
     if isinstance(message_tool, MessageTool):
@@ -1149,12 +1190,32 @@ def _run_gateway(
             agent.sessions.save(session)
 
             logger.info("Companion: delivering proactive message ({})", decision.reason)
+            outbound = OutboundMessage(channel=channel, chat_id=chat_id, content=response)
             await _deliver_to_channel(
-                OutboundMessage(channel=channel, chat_id=chat_id, content=response),
+                outbound,
                 record=True,
+                session_key="companion",
+                followup_origin="companion",
             )
             record_companion_sent(companion_state_path(config.workspace_path))
             return response
+
+        # Follow-up nudge checker (AI decides send / reschedule / abandon).
+        if job.name == "companion_followup":
+            from nanobot.companion.followup import run_followup_check
+
+            result = await run_followup_check(
+                workspace=config.workspace_path,
+                cfg=companion_cfg,
+                provider=agent.provider,
+                model=agent.model,
+                session_manager=session_manager,
+                timezone=config.agents.defaults.timezone,
+                deliver=_deliver_to_channel,
+            )
+            if result.action != "none":
+                logger.info("Companion follow-up: {} ({})", result.action, result.reason)
+            return None
 
         reminder_note = (
             "The scheduled time has arrived. Deliver this reminder to the user now, "
@@ -1334,6 +1395,17 @@ def _run_gateway(
             ),
             payload=CronPayload(kind="system_event"),
         ))
+        if companion_cfg.followup_enabled:
+            cron.register_system_job(CronJob(
+                id="companion_followup",
+                name="companion_followup",
+                schedule=CronSchedule(
+                    kind="every",
+                    every_ms=companion_cfg.followup_check_interval_s * 1000,
+                    tz=config.agents.defaults.timezone,
+                ),
+                payload=CronPayload(kind="system_event"),
+            ))
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""

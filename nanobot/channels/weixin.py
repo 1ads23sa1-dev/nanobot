@@ -167,6 +167,14 @@ class WeixinChannel(BaseChannel):
         self._typing_tickets: dict[str, dict[str, Any]] = {}
         self._context_token_at: dict[str, float] = {}
         self._pending_tool_hints: dict[str, list[str]] = {}
+        self._message_burst_cfg: Any | None = None
+        self._workspace_path: Path | None = None
+
+    def set_message_burst_config(self, cfg: Any) -> None:
+        self._message_burst_cfg = cfg
+
+    def set_workspace_path(self, path: Path) -> None:
+        self._workspace_path = path
 
     # ------------------------------------------------------------------
     # State persistence
@@ -782,6 +790,15 @@ class WeixinChannel(BaseChannel):
 
         await self._start_typing(from_user_id, ctx_token)
 
+        if self._workspace_path is not None:
+            from nanobot.companion.followup import clear_followup_on_user_reply
+
+            clear_followup_on_user_reply(
+                self._workspace_path,
+                channel=self.name,
+                chat_id=from_user_id,
+            )
+
         await self._handle_message(
             sender_id=from_user_id,
             chat_id=from_user_id,
@@ -1163,9 +1180,32 @@ class WeixinChannel(BaseChannel):
             if not content:
                 return
 
-            chunks = split_message(content, WEIXIN_MAX_MESSAGE_LEN)
-            for chunk in chunks:
-                await self._send_text(msg.chat_id, chunk, ctx_token)
+            burst_parts = [content]
+            burst_cfg = self._message_burst_cfg
+            if (
+                burst_cfg
+                and getattr(burst_cfg, "enabled", False)
+                and "weixin" in getattr(burst_cfg, "channels", ["weixin"])
+                and not is_progress
+                and not (msg.metadata or {}).get("_progress")
+            ):
+                from nanobot.delivery.burst import maybe_burst_parts, random_burst_delay_s
+
+                burst_parts = maybe_burst_parts(content, burst_cfg, rng=random.Random())
+
+            for part_idx, part in enumerate(burst_parts):
+                if part_idx > 0 and burst_cfg is not None:
+                    delay_s = random_burst_delay_s(burst_cfg, rng=random.Random())
+                    if typing_ticket:
+                        with suppress(Exception):
+                            await self._send_typing(
+                                msg.chat_id, typing_ticket, TYPING_STATUS_TYPING,
+                            )
+                    await asyncio.sleep(delay_s)
+
+                chunks = split_message(part, WEIXIN_MAX_MESSAGE_LEN)
+                for chunk in chunks:
+                    await self._send_text(msg.chat_id, chunk, ctx_token)
         except Exception:
             self.logger.exception("Error sending message")
             raise

@@ -144,6 +144,12 @@ class ChannelManager:
                 channel.show_reasoning = self._resolve_bool_override(
                     section, "show_reasoning", self.config.channels.show_reasoning,
                 )
+                if name == "weixin":
+                    from nanobot.channels.weixin import WeixinChannel
+
+                    if isinstance(channel, WeixinChannel):
+                        channel.set_message_burst_config(self.config.gateway.message_burst)
+                        channel.set_workspace_path(Path(self.config.workspace_path))
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
