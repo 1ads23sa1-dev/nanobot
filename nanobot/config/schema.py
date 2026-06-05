@@ -255,6 +255,31 @@ class MessageBurstConfig(Base):
     max_delay_s: float = Field(default=7.0, ge=0.0)
     split_marker: str = "---"
     channels: list[str] = Field(default_factory=lambda: ["weixin"])
+    stumble_enabled: bool = True
+    stumble_probability: float = Field(default=0.08, ge=0.0, le=1.0)
+    correction_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    stumble_min_delay_s: float = Field(default=3.0, ge=0.0)
+    stumble_max_delay_s: float = Field(default=6.5, ge=0.0)
+
+
+class SelectiveDelayConfig(Base):
+    """Delay before replying so low-stakes chats feel less robotic."""
+
+    enabled: bool = True
+    channels: list[str] = Field(default_factory=lambda: ["weixin"])
+    min_delay_s: float = Field(default=2.0, ge=0.0)
+    max_delay_s: float = Field(default=25.0, ge=0.0)
+    long_delay_min_s: float = Field(default=45.0, ge=0.0)
+    long_delay_max_s: float = Field(default=180.0, ge=0.0)
+    casual_defer_probability: float = Field(default=0.35, ge=0.0, le=1.0)
+    low_stakes_probability: float = Field(default=0.22, ge=0.0, le=1.0)
+
+
+class MoodConfig(Base):
+    """Persistent per-chat mood axes for companion persona."""
+
+    enabled: bool = True
+    decay_half_life_hours: float = Field(default=8.0, ge=0.5, le=72.0)
 
 
 class CompanionConfig(Base):
@@ -291,6 +316,8 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     companion: CompanionConfig = Field(default_factory=CompanionConfig)
     message_burst: MessageBurstConfig = Field(default_factory=MessageBurstConfig)
+    selective_delay: SelectiveDelayConfig = Field(default_factory=SelectiveDelayConfig)
+    mood: MoodConfig = Field(default_factory=MoodConfig)
 
 
 class MCPServerConfig(Base):

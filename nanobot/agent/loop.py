@@ -201,6 +201,9 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         companion_enabled: bool = False,
+        selective_delay_config: Any = None,
+        mood_config: Any = None,
+        companion_gateway_config: Any = None,
         tools_config: ToolsConfig | None = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
@@ -272,6 +275,11 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             companion_enabled=companion_enabled,
         )
+        self.companion_enabled = companion_enabled
+        self._selective_delay_config = selective_delay_config
+        self._mood_config = mood_config
+        self._companion_gateway_config = companion_gateway_config
+        self._timezone = timezone or "Asia/Shanghai"
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
@@ -395,6 +403,9 @@ class AgentLoop:
             unified_session=defaults.unified_session,
             disabled_skills=disabled_skills,
             companion_enabled=companion_enabled,
+            selective_delay_config=config.gateway.selective_delay,
+            mood_config=config.gateway.mood,
+            companion_gateway_config=config.gateway.companion,
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
@@ -663,6 +674,16 @@ class AgentLoop:
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
+        runtime_lines: list[str] = []
+        if (
+            self._mood_config
+            and getattr(self._mood_config, "enabled", False)
+            and msg.channel == "weixin"
+        ):
+            from nanobot.companion.mood import load_mood, mood_runtime_line
+
+            mood = load_mood(self.workspace, msg.channel, msg.chat_id)
+            runtime_lines.append(mood_runtime_line(mood))
         return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
@@ -676,6 +697,83 @@ class AgentLoop:
             runtime_state=self,
             inbound_message=msg,
             include_memory_recent_history=include_memory_recent_history,
+            current_runtime_lines=runtime_lines or None,
+        )
+
+    async def _apply_persona_inbound_pacing(self, msg: InboundMessage) -> None:
+        """Update mood and optionally delay before replying (WeChat persona)."""
+        from nanobot.session.turn_continuation import (
+            internal_continuation_inbound,
+            should_persist_user_message,
+        )
+
+        if msg.channel != "weixin" or not should_persist_user_message(msg.metadata):
+            return
+        if internal_continuation_inbound(msg.metadata):
+            return
+
+        companion_cfg = self._companion_gateway_config
+        mood_cfg = self._mood_config
+        mood = None
+        if mood_cfg and getattr(mood_cfg, "enabled", False):
+            from nanobot.companion.mood import touch_mood_for_chat
+
+            mood = touch_mood_for_chat(
+                self.workspace,
+                msg.channel,
+                msg.chat_id,
+                user_content=msg.content,
+                timezone=self._timezone,
+                quiet_start=getattr(companion_cfg, "quiet_hours_start", "23:00"),
+                quiet_end=getattr(companion_cfg, "quiet_hours_end", "08:00"),
+                half_life_hours=getattr(mood_cfg, "decay_half_life_hours", 8.0),
+            )
+
+        delay_cfg = self._selective_delay_config
+        if not delay_cfg or not getattr(delay_cfg, "enabled", False):
+            return
+        from nanobot.companion.selective_delay import (
+            decide_inbound_delay_s,
+            should_apply_selective_delay,
+        )
+
+        if not should_apply_selective_delay(
+            channel=msg.channel,
+            cfg=delay_cfg,
+            is_command=self.commands.is_dispatchable_command(msg.content.strip()),
+        ):
+            return
+
+        delay_s = decide_inbound_delay_s(msg.content, delay_cfg, mood)
+        if delay_s > 0:
+            logger.debug(
+                "Selective delay {:.1f}s before reply to {}:{}",
+                delay_s,
+                msg.channel,
+                msg.chat_id,
+            )
+            await asyncio.sleep(delay_s)
+
+    def _record_persona_outbound_mood(self, response: OutboundMessage | None) -> None:
+        if response is None or response.channel != "weixin":
+            return
+        mood_cfg = self._mood_config
+        if not mood_cfg or not getattr(mood_cfg, "enabled", False):
+            return
+        if (response.metadata or {}).get("_followup_nudge"):
+            return
+        from nanobot.companion.mood import touch_mood_for_chat
+
+        companion_cfg = self._companion_gateway_config
+        touch_mood_for_chat(
+            self.workspace,
+            response.channel,
+            response.chat_id,
+            bot_content=response.content,
+            timezone=self._timezone,
+            quiet_start=getattr(companion_cfg, "quiet_hours_start", "23:00"),
+            quiet_end=getattr(companion_cfg, "quiet_hours_end", "08:00"),
+            half_life_hours=getattr(mood_cfg, "decay_half_life_hours", 8.0),
         )
 
     async def _dispatch_command_inline(
@@ -998,6 +1096,7 @@ class AgentLoop:
                 pending = asyncio.Queue(maxsize=20)
                 self._pending_queues[session_key] = pending
                 try:
+                    await self._apply_persona_inbound_pacing(msg)
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
                         # Split one answer into distinct stream segments.
@@ -1038,6 +1137,7 @@ class AgentLoop:
                     completed_chat_id = msg.chat_id
                     if response is not None:
                         await self.bus.publish_outbound(response)
+                        self._record_persona_outbound_mood(response)
                         plan_cb = getattr(self, "_followup_plan_callback", None)
                         if plan_cb is not None:
                             try:

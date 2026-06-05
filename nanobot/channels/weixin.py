@@ -1189,19 +1189,36 @@ class WeixinChannel(BaseChannel):
                 and not is_progress
                 and not (msg.metadata or {}).get("_progress")
             ):
-                from nanobot.delivery.burst import maybe_burst_parts, random_burst_delay_s
+                from nanobot.companion.mood import load_mood
+                from nanobot.delivery.burst import plan_burst_delivery
 
-                burst_parts = maybe_burst_parts(content, burst_cfg, rng=random.Random())
+                mood = None
+                if self._workspace_path is not None:
+                    mood = load_mood(self._workspace_path, self.name, msg.chat_id)
+                delivery = plan_burst_delivery(
+                    content, burst_cfg, rng=random.Random(), mood=mood,
+                )
+                burst_parts = delivery.parts
+                burst_delays = delivery.delays_after_s
+            else:
+                burst_delays = []
 
             for part_idx, part in enumerate(burst_parts):
-                if part_idx > 0 and burst_cfg is not None:
-                    delay_s = random_burst_delay_s(burst_cfg, rng=random.Random())
-                    if typing_ticket:
+                if part_idx > 0:
+                    if part_idx - 1 < len(burst_delays):
+                        delay_s = burst_delays[part_idx - 1]
+                    elif burst_cfg is not None:
+                        from nanobot.delivery.burst import random_burst_delay_s
+
+                        delay_s = random_burst_delay_s(burst_cfg, rng=random.Random())
+                    else:
+                        delay_s = 0.0
+                    if delay_s > 0 and typing_ticket:
                         with suppress(Exception):
                             await self._send_typing(
                                 msg.chat_id, typing_ticket, TYPING_STATUS_TYPING,
                             )
-                    await asyncio.sleep(delay_s)
+                        await asyncio.sleep(delay_s)
 
                 chunks = split_message(part, WEIXIN_MAX_MESSAGE_LEN)
                 for chunk in chunks:

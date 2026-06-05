@@ -1008,6 +1008,24 @@ def _run_gateway(
             session_manager.save(session)
         await bus.publish_outbound(msg)
         if (
+            config.gateway.mood.enabled
+            and msg.channel == "weixin"
+            and (msg.content or "").strip()
+            and not (msg.metadata or {}).get("_followup_nudge")
+        ):
+            from nanobot.companion.mood import touch_mood_for_chat
+
+            touch_mood_for_chat(
+                config.workspace_path,
+                msg.channel,
+                msg.chat_id,
+                bot_content=msg.content,
+                timezone=config.agents.defaults.timezone,
+                quiet_start=companion_cfg.quiet_hours_start,
+                quiet_end=companion_cfg.quiet_hours_end,
+                half_life_hours=config.gateway.mood.decay_half_life_hours,
+            )
+        if (
             followup_origin
             and msg.channel == "weixin"
             and not (msg.metadata or {}).get("_followup_nudge")
