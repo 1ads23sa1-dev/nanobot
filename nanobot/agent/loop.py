@@ -126,6 +126,8 @@ class TurnContext:
 
     ephemeral: bool = False
     tools: ToolRegistry | None = None
+    lightweight_chat: bool = False
+    max_iterations_override: int | None = None
 
     turn_wall_started_at: float = field(default_factory=time.time)
     visible_run_started_at: float | None = None
@@ -671,6 +673,8 @@ class AgentLoop:
         history: list[dict[str, Any]],
         pending_summary: str | None,
         include_memory_recent_history: bool = True,
+        *,
+        lightweight_chat: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         scope = self.workspace_scopes.for_message(msg, session.metadata)
@@ -697,6 +701,7 @@ class AgentLoop:
             runtime_state=self,
             inbound_message=msg,
             include_memory_recent_history=include_memory_recent_history,
+            lightweight_chat=lightweight_chat,
             current_runtime_lines=runtime_lines or None,
         )
 
@@ -839,6 +844,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
         ephemeral: bool = False,
         tools: ToolRegistry | None = None,
+        max_iterations: int | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -955,7 +961,7 @@ class AgentLoop:
                 initial_messages=initial_messages,
                 tools=tools or self.tools,
                 model=self.model,
-                max_iterations=self.max_iterations,
+                max_iterations=max_iterations if max_iterations is not None else self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
                 error_message="Sorry, I encountered an error calling the AI model.",
@@ -1577,12 +1583,32 @@ class AgentLoop:
             self.llm_runtime(),
         )
 
+        companion_cfg = self._companion_gateway_config
+        if (
+            self.companion_enabled
+            and companion_cfg
+            and getattr(companion_cfg, "lightweight_chat", True)
+            and ctx.msg.channel == "weixin"
+            and not self.commands.is_dispatchable_command(ctx.msg.content.strip())
+        ):
+            from nanobot.agent.tools.registry import ToolRegistry
+            from nanobot.companion.chat_mode import is_lightweight_chat
+
+            if is_lightweight_chat(
+                ctx.msg.content,
+                has_media=bool(ctx.msg.media),
+            ):
+                ctx.lightweight_chat = True
+                ctx.tools = ToolRegistry()
+                ctx.max_iterations_override = 1
+
         ctx.initial_messages = self._build_initial_messages(
             ctx.msg,
             ctx.session,
             ctx.history,
             ctx.pending_summary,
             include_memory_recent_history=not ctx.ephemeral,
+            lightweight_chat=ctx.lightweight_chat,
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
@@ -1619,6 +1645,7 @@ class AgentLoop:
             pending_queue=ctx.pending_queue,
             ephemeral=ctx.ephemeral,
             tools=ctx.tools,
+            max_iterations=ctx.max_iterations_override,
         )
         final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content

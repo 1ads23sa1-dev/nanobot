@@ -1158,38 +1158,49 @@ def _run_gateway(
         # Companion: random-triggered proactive check-ins (not fixed clock schedules).
         if job.name == "companion":
             from nanobot.companion import (
-                COMPANION_PREAMBLE,
+                build_companion_preamble,
                 companion_state_path,
+                pick_delivery_target,
                 record_companion_sent,
                 should_send_companion_message,
             )
 
             companion_cfg = config.gateway.companion
-            decision = should_send_companion_message(
-                companion_cfg,
-                workspace=config.workspace_path,
-                timezone=config.agents.defaults.timezone,
-            )
-            if not decision.should_send:
-                logger.debug("Companion: skipped ({})", decision.reason)
-                return None
-
             channel, chat_id = pick_delivery_target(
                 pinned_channel=companion_cfg.channel,
                 pinned_chat_id=companion_cfg.chat_id,
                 enabled_channels=set(channels.enabled_channels),
                 session_manager=session_manager,
             )
+            decision = should_send_companion_message(
+                companion_cfg,
+                workspace=config.workspace_path,
+                timezone=config.agents.defaults.timezone,
+                session_manager=session_manager,
+                delivery_channel=channel,
+                delivery_chat_id=chat_id,
+            )
+            if not decision.should_send:
+                logger.debug("Companion: skipped ({})", decision.reason)
+                return None
+
             if channel == "cli":
                 logger.debug("Companion: no routable delivery target")
                 return None
+
+            companion_prompt = build_companion_preamble(
+                config.workspace_path,
+                channel=channel,
+                chat_id=chat_id,
+                session_manager=session_manager,
+            )
 
             suppress_token = None
             if isinstance(message_tool, MessageTool):
                 suppress_token = message_tool.set_suppress_delivery(True)
             try:
                 resp = await agent.process_direct(
-                    COMPANION_PREAMBLE,
+                    companion_prompt,
                     session_key="companion",
                     channel=channel,
                     chat_id=chat_id,

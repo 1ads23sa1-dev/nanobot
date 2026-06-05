@@ -93,6 +93,41 @@ def test_should_send_on_random_hit(tmp_path: Path):
     assert miss.should_send is False
 
 
+def test_should_send_skips_recent_user_chat(tmp_path: Path):
+    from datetime import datetime
+
+    noon_ms = _utc_noon_ms()
+    cfg = CompanionConfig(
+        enabled=True,
+        send_probability=1.0,
+        min_interval_s=0,
+        recent_chat_skip_minutes=30,
+        channel="weixin",
+        chat_id="user-1",
+    )
+
+    class _Sessions:
+        def read_session_file(self, key: str):
+            if key != "weixin:user-1":
+                return None
+            return {
+                "updated_at": datetime.fromtimestamp(noon_ms / 1000 - 600).isoformat(),
+            }
+
+    decision = should_send_companion_message(
+        cfg,
+        workspace=tmp_path,
+        timezone="UTC",
+        rng=random.Random(0),
+        now_ms=noon_ms,
+        session_manager=_Sessions(),  # type: ignore[arg-type]
+        delivery_channel="weixin",
+        delivery_chat_id="user-1",
+    )
+    assert decision.should_send is False
+    assert decision.reason == "recent user chat"
+
+
 def test_pick_delivery_target_prefers_pin():
     class _Sessions:
         def list_sessions(self):

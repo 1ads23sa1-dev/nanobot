@@ -8,7 +8,7 @@ from nanobot.companion.followup import (
     read_followup_thread,
     run_followup_check,
 )
-from nanobot.companion.prompts import COMPANION_PREAMBLE
+from nanobot.companion.prompts import COMPANION_PREAMBLE, build_companion_preamble
 from nanobot.companion.trigger import (
     companion_state_path,
     read_companion_state,
@@ -18,6 +18,7 @@ from nanobot.companion.trigger import (
 
 __all__ = [
     "COMPANION_PREAMBLE",
+    "build_companion_preamble",
     "clear_followup",
     "clear_followup_on_user_reply",
     "companion_state_path",

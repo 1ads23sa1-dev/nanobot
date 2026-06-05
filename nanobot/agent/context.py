@@ -71,6 +71,8 @@ class ContextBuilder:
         session_summary: str | None = None,
         workspace: Path | None = None,
         include_memory_recent_history: bool = True,
+        *,
+        lightweight_chat: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         root = workspace or self.workspace
@@ -85,7 +87,12 @@ class ContextBuilder:
             if persona:
                 parts.append(f"# Companion\n\n{persona.strip()}")
 
-        parts.append(render_template("agent/tool_contract.md"))
+        if lightweight_chat:
+            chat_style = load_bundled_template("companion/chat_style.md")
+            if chat_style:
+                parts.append(f"# Chat Style\n\n{chat_style.strip()}")
+        else:
+            parts.append(render_template("agent/tool_contract.md"))
 
         memory = self.memory.get_memory_context()
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
@@ -202,6 +209,7 @@ class ContextBuilder:
         inbound_message: Any | None = None,
         skip_runtime_lines: bool = False,
         include_memory_recent_history: bool = True,
+        lightweight_chat: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         root = workspace or self.workspace
@@ -232,12 +240,13 @@ class ContextBuilder:
         messages = [
             {
                 "role": "system",
-                "content": self.build_system_prompt(
+                "                content": self.build_system_prompt(
                     skill_names,
                     channel=channel,
                     session_summary=session_summary,
                     workspace=root,
                     include_memory_recent_history=include_memory_recent_history,
+                    lightweight_chat=lightweight_chat,
                 ),
             },
             *history,

@@ -169,9 +169,13 @@ class WeixinChannel(BaseChannel):
         self._pending_tool_hints: dict[str, list[str]] = {}
         self._message_burst_cfg: Any | None = None
         self._workspace_path: Path | None = None
+        self._companion_cfg: Any | None = None
 
     def set_message_burst_config(self, cfg: Any) -> None:
         self._message_burst_cfg = cfg
+
+    def set_companion_config(self, cfg: Any) -> None:
+        self._companion_cfg = cfg
 
     def set_workspace_path(self, path: Path) -> None:
         self._workspace_path = path
@@ -1179,6 +1183,22 @@ class WeixinChannel(BaseChannel):
             # --- Send text content ---
             if not content:
                 return
+
+            companion_cfg = self._companion_cfg
+            if (
+                companion_cfg
+                and getattr(companion_cfg, "sanitize_reply", True)
+                and not is_progress
+                and not (msg.metadata or {}).get("_progress")
+            ):
+                from nanobot.companion.sanitize import sanitize_companion_reply
+
+                content = sanitize_companion_reply(
+                    content,
+                    max_chars=getattr(companion_cfg, "max_reply_chars", 300),
+                )
+                if not content:
+                    return
 
             burst_parts = [content]
             burst_cfg = self._message_burst_cfg

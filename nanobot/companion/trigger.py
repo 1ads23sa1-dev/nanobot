@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from nanobot.config.schema import CompanionConfig
+    from nanobot.session.manager import SessionManager
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,32 @@ def in_quiet_hours(
     return current_minutes >= start_minutes or current_minutes < end_minutes
 
 
+def _recent_user_chat(
+    *,
+    session_manager: SessionManager | None,
+    channel: str,
+    chat_id: str,
+    skip_minutes: int,
+    now_ms: int,
+) -> bool:
+    """Return True if the user chatted recently on the pinned session."""
+    if skip_minutes <= 0 or not session_manager or not channel or not chat_id:
+        return False
+    session_key = f"{channel}:{chat_id}"
+    detail = session_manager.read_session_file(session_key)
+    if not detail:
+        return False
+    updated_at = detail.get("updated_at")
+    if not isinstance(updated_at, str) or not updated_at:
+        return False
+    try:
+        last = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return False
+    elapsed_s = (now_ms / 1000) - last.timestamp()
+    return elapsed_s < skip_minutes * 60
+
+
 def should_send_companion_message(
     cfg: CompanionConfig,
     *,
@@ -89,6 +116,9 @@ def should_send_companion_message(
     timezone: str,
     rng: random.Random | None = None,
     now_ms: int | None = None,
+    session_manager: SessionManager | None = None,
+    delivery_channel: str = "",
+    delivery_chat_id: str = "",
 ) -> CompanionTriggerDecision:
     """Decide whether this companion check should send a proactive message."""
     if not cfg.enabled:
@@ -106,6 +136,17 @@ def should_send_companion_message(
         quiet_end=cfg.quiet_hours_end,
     ):
         return CompanionTriggerDecision(False, "quiet hours")
+
+    channel = (delivery_channel or cfg.channel or "").strip()
+    chat_id = (delivery_chat_id or cfg.chat_id or "").strip()
+    if _recent_user_chat(
+        session_manager=session_manager,
+        channel=channel,
+        chat_id=chat_id,
+        skip_minutes=getattr(cfg, "recent_chat_skip_minutes", 30),
+        now_ms=timestamp_ms,
+    ):
+        return CompanionTriggerDecision(False, "recent user chat")
 
     state = read_companion_state(companion_state_path(workspace))
     last_sent_ms = state.get("last_sent_ms")

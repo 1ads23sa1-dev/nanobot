@@ -249,7 +249,7 @@ class MessageBurstConfig(Base):
     """Split outbound text into multiple chat bubbles with optional random delays."""
 
     enabled: bool = True
-    burst_probability: float = Field(default=0.30, ge=0.0, le=1.0)
+    burst_probability: float = Field(default=0.35, ge=0.0, le=1.0)
     max_parts: int = Field(default=3, ge=1, le=5)
     min_delay_s: float = Field(default=2.5, ge=0.0)
     max_delay_s: float = Field(default=7.0, ge=0.0)
@@ -287,8 +287,8 @@ class CompanionConfig(Base):
 
     enabled: bool = True
     check_interval_s: int = Field(default=20 * 60, ge=60)  # roll dice every 20 minutes
-    send_probability: float = Field(default=0.18, ge=0.0, le=1.0)
-    min_interval_s: int = Field(default=90 * 60, ge=0)  # at least 90 minutes between sends
+    send_probability: float = Field(default=0.12, ge=0.0, le=1.0)
+    min_interval_s: int = Field(default=7200, ge=0)  # at least 2 hours between sends
     quiet_hours_start: str = "23:00"
     quiet_hours_end: str = "08:00"
     channel: str = ""  # optional pinned delivery channel (e.g. "telegram")
@@ -298,6 +298,10 @@ class CompanionConfig(Base):
     followup_check_interval_s: int = Field(default=5 * 60, ge=60)
     max_followup_nudges: int = Field(default=3, ge=0, le=5)
     min_followup_interval_s: int = Field(default=10 * 60, ge=60)
+    lightweight_chat: bool = True  # skip tools for casual WeChat chit-chat
+    recent_chat_skip_minutes: int = Field(default=30, ge=0)  # skip proactive if user chatted recently
+    sanitize_reply: bool = True  # strip AI-assistant phrasing before WeChat send
+    max_reply_chars: int = Field(default=300, ge=80, le=2000)
 
 
 class ApiConfig(Base):

@@ -59,6 +59,10 @@ def load_config(config_path: Path | None = None) -> Config:
             logger.warning("Using default configuration.")
 
     _apply_ssrf_whitelist(config)
+    if config.gateway.companion.enabled:
+        from nanobot.config.companion_defaults import ensure_companion_preset
+
+        ensure_companion_preset(config)
     return config
 
 

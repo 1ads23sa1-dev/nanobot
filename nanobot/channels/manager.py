@@ -149,6 +149,7 @@ class ChannelManager:
 
                     if isinstance(channel, WeixinChannel):
                         channel.set_message_burst_config(self.config.gateway.message_burst)
+                        channel.set_companion_config(self.config.gateway.companion)
                         channel.set_workspace_path(Path(self.config.workspace_path))
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
